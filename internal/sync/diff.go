@@ -97,7 +97,7 @@ func computeVisibleElements(m *model.BausteinsichtModel) map[string]bool {
 	if len(m.Views) == 0 {
 		return nil // all elements visible
 	}
-	flat, _ := model.FlattenElements(m)
+	flat, flatErr := model.FlattenElements(m)
 	visible := make(map[string]bool)
 	for _, view := range m.Views {
 		v := view
@@ -116,7 +116,7 @@ func computeVisibleElements(m *model.BausteinsichtModel) map[string]bool {
 		// the scope and each included element (see ApplyForward), so count them
 		// as visible too — otherwise they are falsely reported as not in any
 		// view even though the diagram draws them (#571 review).
-		if view.Layout == "nested" && view.Scope != "" {
+		if view.Layout == "nested" && view.Scope != "" && flatErr == nil {
 			for _, id := range resolved {
 				for _, anc := range ancestorContainersWithinScope(id, view.Scope, flat) {
 					visible[anc] = true
