@@ -252,6 +252,7 @@ var validLayouts = map[string]bool{
 	"layered": true,
 	"grid":    true,
 	"none":    true,
+	"nested":  true,
 }
 
 func validateViews(m *BausteinsichtModel) []ValidationError {
@@ -264,7 +265,7 @@ func validateViews(m *BausteinsichtModel) []ValidationError {
 		if !validLayouts[view.Layout] {
 			errs = append(errs, ValidationError{
 				Path:    path,
-				Message: fmt.Sprintf("invalid layout %q (must be \"layered\", \"grid\", \"none\", or empty)", view.Layout),
+				Message: fmt.Sprintf("invalid layout %q (must be \"layered\", \"grid\", \"none\", \"nested\", or empty)", view.Layout),
 			})
 		}
 		errs = append(errs, validateDocLinks(path+".docLinks", view.DocLinks)...)
