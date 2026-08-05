@@ -1,13 +1,19 @@
 {
-  "checksum": "sha256:c7aad08e52cf2507686dabf6752fd10c60ea495c4e2df25626581ed141ae5a5a",
-  "timestamp": "2026-07-26T19:20:20Z",
-  "model_hash": "sha256:8793c44ec8c5ab838db8f7edff91f95f71f7e9f33fa3118250ddecc872038949",
-  "drawio_hash": "sha256:ab81e2c53d2ab1433ca4e82df4563a3c0e243781edd8fe02a4aa42bcc03d09e5",
+  "checksum": "sha256:6be319c87fa05325972f89c8169a140cef1b2231c0549a3eb7259f00d6c99a44",
+  "timestamp": "2026-08-05T13:07:05Z",
+  "model_hash": "sha256:c959d9579e03e0aa6d8016f7ea902f437d9b0df2cb11fe9e626bd5312010f871",
+  "drawio_hash": "sha256:d6bbe55670dfe28a0adb037fcdd7a4797637e42734e34d8e1a422be699f2fe53",
   "elements": {
     "customer": {
       "title": "Customer",
       "description": "Places orders through the web frontend",
       "kind": "actor"
+    },
+    "orderRecord": {
+      "title": "OrderRecord",
+      "description": "Persistence entity the Postgres Order Adapter writes, mapped from the domain Order",
+      "technology": "JPA / Hibernate",
+      "kind": "boundary-object"
     },
     "ordering": {
       "title": "Ordering",
@@ -53,6 +59,10 @@
       "title": "Money",
       "kind": "valueObject"
     },
+    "ordering.adapters.ports.domain.payment": {
+      "title": "Payment",
+      "kind": "aggregate"
+    },
     "ordering.adapters.ports.domain.pricing": {
       "title": "Pricing Service",
       "kind": "domainService"
@@ -79,11 +89,23 @@
       "technology": "PostgreSQL",
       "kind": "datastore"
     },
+    "placeOrderRequest": {
+      "title": "PlaceOrderRequest",
+      "description": "Inbound REST request DTO the Order REST Controller deserializes and maps to a domain call",
+      "technology": "REST / JSON",
+      "kind": "boundary-object"
+    },
     "stripe": {
       "title": "Stripe",
       "description": "Third-party payment provider",
       "technology": "Stripe API",
       "kind": "externalSystem"
+    },
+    "stripeCharge": {
+      "title": "StripeCharge",
+      "description": "Payment request/response DTO the Stripe Payment Adapter exchanges with Stripe, mapped from the Payment aggregate",
+      "technology": "Stripe API / JSON",
+      "kind": "boundary-object"
     }
   },
   "relationships": [
@@ -163,10 +185,67 @@
       "index": 10,
       "label": "charges card",
       "kind": "uses"
+    },
+    {
+      "from": "placeOrderRequest",
+      "to": "ordering.adapters.ports.domain.order",
+      "index": 11,
+      "label": "maps to",
+      "kind": "maps"
+    },
+    {
+      "from": "orderRecord",
+      "to": "ordering.adapters.ports.domain.order",
+      "index": 12,
+      "label": "maps to",
+      "kind": "maps"
+    },
+    {
+      "from": "ordering.adapters.rest",
+      "to": "placeOrderRequest",
+      "index": 13,
+      "label": "accepts",
+      "kind": "uses"
+    },
+    {
+      "from": "ordering.adapters.ordersAdapter",
+      "to": "orderRecord",
+      "index": 14,
+      "label": "writes",
+      "kind": "uses"
+    },
+    {
+      "from": "stripeCharge",
+      "to": "ordering.adapters.ports.domain.payment",
+      "index": 15,
+      "label": "maps to",
+      "kind": "maps"
+    },
+    {
+      "from": "ordering.adapters.paymentAdapter",
+      "to": "stripeCharge",
+      "index": 16,
+      "label": "charges via",
+      "kind": "uses"
+    },
+    {
+      "from": "ordering.adapters.ports.domain.order",
+      "to": "ordering.adapters.ports.domain.payment",
+      "index": 17,
+      "label": "references",
+      "kind": "uses"
+    },
+    {
+      "from": "ordering.adapters.ports.domain.appService",
+      "to": "ordering.adapters.ports.domain.payment",
+      "index": 18,
+      "label": "orchestrates",
+      "kind": "uses"
     }
   ],
   "rendered_elements": {
     "customer": true,
+    "orderRecord": true,
     "ordering": true,
     "ordering.adapters": true,
     "ordering.adapters.ordersAdapter": true,
@@ -177,12 +256,15 @@
     "ordering.adapters.ports.domain.order": true,
     "ordering.adapters.ports.domain.order.line": true,
     "ordering.adapters.ports.domain.order.total": true,
+    "ordering.adapters.ports.domain.payment": true,
     "ordering.adapters.ports.domain.pricing": true,
     "ordering.adapters.ports.orderRepo": true,
     "ordering.adapters.ports.payment": true,
     "ordering.adapters.ports.placeOrder": true,
     "ordering.adapters.rest": true,
     "ordersDb": true,
-    "stripe": true
+    "placeOrderRequest": true,
+    "stripe": true,
+    "stripeCharge": true
   }
 }

@@ -86,13 +86,21 @@
       "externalSystem": {
         "notation": "External System",
         "description": "A third-party system outside your control"
+      },
+      "boundary-object": {
+        "notation": "Boundary Object",
+        "description": "Adapter-side data shape (DTO / JPA entity / view-model) mapped to/from a domain object"
       }
     },
 
     "relationships": {
       "drives": { "notation": "drives" },
       "implements": { "notation": "implements", "dashed": true },
-      "uses": { "notation": "uses" }
+      "uses": { "notation": "uses" },
+      "maps": {
+        "notation": "maps",
+        "dashed": true
+      }
     },
 
     "tags": [
@@ -138,6 +146,9 @@
                         "line":  { "kind": "entity",      "title": "Order Line", "tags": ["domain"], "metadata": { "side": "top" } },
                         "total": { "kind": "valueObject", "title": "Money",      "tags": ["domain"], "metadata": { "side": "bottom" } }
                       }
+                    },
+                    "payment": {
+                      "kind": "aggregate", "title": "Payment", "tags": ["domain"], "metadata": { "side": "bottom" }
                     }
                   }
                 }
@@ -149,7 +160,25 @@
     },
 
     "ordersDb": { "kind": "datastore",      "title": "Orders Database", "technology": "PostgreSQL" },
-    "stripe":   { "kind": "externalSystem", "title": "Stripe", "technology": "Stripe API", "description": "Third-party payment provider" }
+    "stripe":   { "kind": "externalSystem", "title": "Stripe", "technology": "Stripe API", "description": "Third-party payment provider" },
+    "placeOrderRequest": {
+      "kind": "boundary-object",
+      "title": "PlaceOrderRequest",
+      "technology": "REST / JSON",
+      "description": "Inbound REST request DTO the Order REST Controller deserializes and maps to a domain call"
+    },
+    "orderRecord": {
+      "kind": "boundary-object",
+      "title": "OrderRecord",
+      "technology": "JPA / Hibernate",
+      "description": "Persistence entity the Postgres Order Adapter writes, mapped from the domain Order"
+    },
+    "stripeCharge": {
+      "kind": "boundary-object",
+      "title": "StripeCharge",
+      "technology": "Stripe API / JSON",
+      "description": "Payment request/response DTO the Stripe Payment Adapter exchanges with Stripe, mapped from the Payment aggregate"
+    }
   },
 
   // ---------------------------------------------------------------------------
@@ -169,7 +198,55 @@
     { "from": "ordering.adapters.paymentAdapter",          "to": "ordering.adapters.ports.payment",     "label": "implements",   "kind": "implements" },
 
     { "from": "ordering.adapters.ordersAdapter",           "to": "ordersDb", "label": "reads/writes",  "kind": "uses", "cardinality": "1:N" },
-    { "from": "ordering.adapters.paymentAdapter",          "to": "stripe",   "label": "charges card",  "kind": "uses", "dataFlow": "request/response" }
+    { "from": "ordering.adapters.paymentAdapter",          "to": "stripe",   "label": "charges card",  "kind": "uses", "dataFlow": "request/response" },
+    {
+      "from": "placeOrderRequest",
+      "to": "ordering.adapters.ports.domain.order",
+      "label": "maps to",
+      "kind": "maps"
+    },
+    {
+      "from": "orderRecord",
+      "to": "ordering.adapters.ports.domain.order",
+      "label": "maps to",
+      "kind": "maps"
+    },
+    {
+      "from": "ordering.adapters.rest",
+      "to": "placeOrderRequest",
+      "label": "accepts",
+      "kind": "uses"
+    },
+    {
+      "from": "ordering.adapters.ordersAdapter",
+      "to": "orderRecord",
+      "label": "writes",
+      "kind": "uses"
+    },
+    {
+      "from": "stripeCharge",
+      "to": "ordering.adapters.ports.domain.payment",
+      "label": "maps to",
+      "kind": "maps"
+    },
+    {
+      "from": "ordering.adapters.paymentAdapter",
+      "to": "stripeCharge",
+      "label": "charges via",
+      "kind": "uses"
+    },
+    {
+      "from": "ordering.adapters.ports.domain.order",
+      "to": "ordering.adapters.ports.domain.payment",
+      "label": "references",
+      "kind": "uses"
+    },
+    {
+      "from": "ordering.adapters.ports.domain.appService",
+      "to": "ordering.adapters.ports.domain.payment",
+      "label": "orchestrates",
+      "kind": "uses"
+    }
   ],
 
   // ---------------------------------------------------------------------------
@@ -198,6 +275,11 @@
       "include": ["ordering.adapters.ports.domain.**"],
       "layout": "nested",
       "description": "The domain core: application service, the Order aggregate (→ Order Line + Money), and domain services"
+    },
+    "data-mapping": {
+      "title": "Data Mapping (boundaries)",
+      "include": ["placeOrderRequest", "orderRecord", "stripeCharge", "ordering.adapters.ports.domain.order", "ordering.adapters.ports.domain.payment", "ordering.adapters.ports.domain.appService", "ordering.adapters.rest", "ordering.adapters.ordersAdapter", "ordering.adapters.paymentAdapter", "ordering.adapters.ports.placeOrder", "ordering.adapters.ports.orderRepo", "ordering.adapters.ports.payment"],
+      "description": "How adapters map their own data shapes (DTO/JPA/Stripe) to/from the Order and Payment aggregates"
     }
   },
 

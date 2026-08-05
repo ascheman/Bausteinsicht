@@ -40,7 +40,7 @@
 
         <!-- ===== Application core (grey) ===== -->
         <object label="" bausteinsicht_template="applicationService" id="tpl-applicationService">
-          <mxCell parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;fontStyle=1;" vertex="1">
+          <mxCell parent="1" style="shape=component;jettyWidth=8;jettyHeight=4;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;fontStyle=1;" vertex="1">
             <mxGeometry width="180" height="60" as="geometry" />
           </mxCell>
         </object>
@@ -62,7 +62,7 @@
           </mxCell>
         </object>
         <object label="" bausteinsicht_template="domainService" id="tpl-domainService">
-          <mxCell parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=2;" vertex="1">
+          <mxCell parent="1" style="shape=component;jettyWidth=8;jettyHeight=4;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=2;" vertex="1">
             <mxGeometry width="170" height="50" as="geometry" />
           </mxCell>
         </object>
@@ -83,6 +83,14 @@
         <object label="" bausteinsicht_template="externalSystem" id="tpl-externalSystem">
           <mxCell parent="1" style="rounded=1;dashed=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;fontSize=12;" vertex="1">
             <mxGeometry width="170" height="70" as="geometry" />
+          </mxCell>
+        </object>
+
+        <!-- Boundary object (DTO / JPA entity / view-model) — purple, UML-class-like,
+             visually distinct from domain (green) / adapter (blue) / port (orange). -->
+        <object label="" bausteinsicht_template="boundary-object" id="tpl-boundary-object">
+          <mxCell parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontColor=#3f2a52;fontSize=12;verticalAlign=top;spacingTop=4;" vertex="1">
+            <mxGeometry width="180" height="60" as="geometry" />
           </mxCell>
         </object>
 

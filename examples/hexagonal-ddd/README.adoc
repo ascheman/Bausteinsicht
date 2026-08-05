@@ -10,8 +10,9 @@ This model demonstrates one consistent way to do that.
 
 Three mechanisms carry the semantics, each with a distinct job:
 
-Element `kind`:: The *structural role* — `drivingAdapter`, `inboundPort`, `applicationService`, `aggregate`, `entity`, `valueObject`, `domainService`, `outboundPort`, `drivenAdapter`, `datastore`, `externalSystem`.
+Element `kind`:: The *structural role* — `drivingAdapter`, `inboundPort`, `applicationService`, `aggregate`, `entity`, `valueObject`, `domainService`, `outboundPort`, `drivenAdapter`, `boundary-object`, `datastore`, `externalSystem`.
 The four hexagonal zones are modelled as *nested container kinds* — `adapterZone` ⊃ `portZone` ⊃ `domainZone` — so the `nested` layout renders them as concentric hexagon rings (see below).
+`boundary-object` is the adapter-side data shape (DTO / JPA entity / view-model) discussed in <<Boundary data objects: the mapping seam>>.
 
 Tags:: The *zone* used for coloring and the `domain-model` view filter: `adapter`, `port`, `application`, `domain`.
 Each zone gets a `style` under `specification.tags`, so elements are color-coded automatically.
@@ -20,11 +21,44 @@ Metadata:: `metadata.side` (`top` / `bottom`) drives *vertical* placement in the
 
 == Views
 
-The model defines three views, each becoming one draw.io page:
+The model defines four views, each becoming one draw.io page:
 
 `context`:: The `ordering` bounded context as a black box, plus the actor and external systems around it.
 `ports-and-adapters`:: The concentric hexagon rings (`"layout": "nested"`): adapters ⊃ ports ⊃ domain core, with driving/inbound on top and driven/outbound below; the actor and external systems sit around the hexagon.
 `domain-model`:: Only the DDD tactical building blocks, selected via `filter-tags: ["domain"]`.
+`data-mapping`:: The *boundary data objects* (DTO / JPA entity / Stripe payload) and how each adapter maps them to/from the `Order` and `Payment` aggregates — see <<Boundary data objects: the mapping seam>>.
+
+== Boundary data objects: the mapping seam
+
+Hexagonal architecture keeps the domain model at the centre and lets each *adapter* map, at its own outer edge, between the domain objects and its own data shape.
+The ports speak domain objects — here the `Order` and `Payment` aggregates — while the REST adapter deserialises a request DTO, the persistence adapter reads and writes a JPA entity, and the payment adapter exchanges a Stripe payload.
+
+This example models those *boundary data objects* with a single element `kind`, `boundary-object`, a `maps` relationship (dashed) to the domain aggregate they map to and from, and a light `uses` association to the owning adapter.
+They are top-level elements and appear only in the dedicated `data-mapping` view, so the concentric rings stay uncluttered.
+
+Two exemplars, one per boundary direction:
+
+* `placeOrderRequest` (`[REST / JSON]`) and `orderRecord` (`[JPA / Hibernate]`) map to and from the `Order` aggregate.
+* `stripeCharge` (`[Stripe API / JSON]`) maps to and from the `Payment` aggregate, which the application service orchestrates alongside `Order`.
+
+[NOTE]
+====
+This is deliberately *not* a class-level model.
+Representing every DTO, field or mapper as an element would mirror the code's type graph and create double maintenance — the very thing an architecture model should avoid.
+Model a *representative* boundary object per seam to make the pattern visible, and keep the fine-grained type details in the code.
+====
+
+The boundary objects were added with the `add` CLI, so the model stays authorable from the command line (and by an LLM):
+
+[source,bash]
+----
+bausteinsicht add specification element boundary-object --notation "Boundary Object" --model architecture.jsonc
+bausteinsicht add specification relationship maps --notation maps --dashed --model architecture.jsonc
+bausteinsicht add element --id orderRecord --kind boundary-object --title "OrderRecord" \
+  --technology "JPA / Hibernate" --model architecture.jsonc
+bausteinsicht add relationship --from orderRecord --to ordering.adapters.ports.domain.order \
+  --kind maps --label "maps to" --model architecture.jsonc
+----
 
 == Constraints (architectural fitness functions)
 
