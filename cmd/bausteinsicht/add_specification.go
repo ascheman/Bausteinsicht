@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/docToolchain/Bausteinsicht/internal/model"
 	"github.com/spf13/cobra"
@@ -59,9 +60,22 @@ func runAddSpecificationElement(cmd *cobra.Command, args []string) error {
 		return exitWithCode(fmt.Errorf("adding element: %w", err), 1)
 	}
 
-	// Save model
-	if err := model.Save(modelPath, m); err != nil {
-		return exitWithCode(fmt.Errorf("saving model: %w", err), 2)
+	// Save model — comment-preserving insertion into specification.elements
+	// (a full model.Save re-serialises the file and drops JSONC comments). #122
+	elemParts := []string{fmt.Sprintf(`"notation": %q`, notation)}
+	if description != "" {
+		elemParts = append(elemParts, fmt.Sprintf(`"description": %q`, description))
+	}
+	if container {
+		elemParts = append(elemParts, `"container": true`)
+	}
+	valueJSON := specEntryObject(elemParts, 3)
+	if perr := model.PatchInsert(modelPath, func(data []byte) ([]byte, error) {
+		return model.InsertObjectEntry(data, []string{"specification", "elements"}, key, valueJSON)
+	}); perr != nil {
+		if err := model.Save(modelPath, m); err != nil {
+			return exitWithCode(fmt.Errorf("saving model: %w", err), 2)
+		}
 	}
 
 	// Output result
@@ -110,6 +124,35 @@ func newAddSpecificationRelationshipCmd() *cobra.Command {
 	return cmd
 }
 
+// specEntryObject builds an indented JSON object literal (for InsertObjectEntry)
+// from ordered `"key": value` field strings. depth is the nesting depth of the
+// entry key (specification.<section>.<key> == depth 3; views.<key> == depth 2).
+// It mirrors the layout the comment-preserving patch writer expects — see
+// marshalElementJSON in add_element.go.
+func specEntryObject(parts []string, depth int) string {
+	fieldIndent := strings.Repeat(" ", (depth+1)*2)
+	closeIndent := strings.Repeat(" ", depth*2)
+	result := "{\n"
+	for i, p := range parts {
+		result += fieldIndent + p
+		if i < len(parts)-1 {
+			result += ","
+		}
+		result += "\n"
+	}
+	result += closeIndent + "}"
+	return result
+}
+
+// jsonStringArray renders a compact inline JSON string array: ["a", "b"].
+func jsonStringArray(items []string) string {
+	quoted := make([]string, len(items))
+	for i, s := range items {
+		quoted[i] = fmt.Sprintf("%q", s)
+	}
+	return "[" + strings.Join(quoted, ", ") + "]"
+}
+
 func runAddSpecificationRelationship(cmd *cobra.Command, args []string) error {
 	key := args[0]
 	notation, _ := cmd.Flags().GetString("notation")
@@ -131,9 +174,18 @@ func runAddSpecificationRelationship(cmd *cobra.Command, args []string) error {
 		return exitWithCode(fmt.Errorf("adding relationship: %w", err), 1)
 	}
 
-	// Save model
-	if err := model.Save(modelPath, m); err != nil {
-		return exitWithCode(fmt.Errorf("saving model: %w", err), 2)
+	// Save model — comment-preserving insertion into specification.relationships. #122
+	relParts := []string{fmt.Sprintf(`"notation": %q`, notation)}
+	if dashed {
+		relParts = append(relParts, `"dashed": true`)
+	}
+	valueJSON := specEntryObject(relParts, 3)
+	if perr := model.PatchInsert(modelPath, func(data []byte) ([]byte, error) {
+		return model.InsertObjectEntry(data, []string{"specification", "relationships"}, key, valueJSON)
+	}); perr != nil {
+		if err := model.Save(modelPath, m); err != nil {
+			return exitWithCode(fmt.Errorf("saving model: %w", err), 2)
+		}
 	}
 
 	// Output result

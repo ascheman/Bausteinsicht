@@ -79,9 +79,33 @@ func runAddView(cmd *cobra.Command, args []string) error {
 		return exitWithCode(fmt.Errorf("adding view: %w", err), 1)
 	}
 
-	// Save model
-	if err := model.Save(modelPath, m); err != nil {
-		return exitWithCode(fmt.Errorf("saving model: %w", err), 2)
+	// Save model. A NEW view is inserted with the comment-preserving patch
+	// writer (a full model.Save re-serialises the file and drops JSONC
+	// comments). Updating an EXISTING view still uses model.Save — patching an
+	// existing view's include array in place is a separate follow-up.
+	if viewExists {
+		if err := model.Save(modelPath, m); err != nil {
+			return exitWithCode(fmt.Errorf("saving model: %w", err), 2)
+		}
+	} else {
+		viewParts := []string{fmt.Sprintf(`"title": %q`, title)}
+		if scope != "" {
+			viewParts = append(viewParts, fmt.Sprintf(`"scope": %q`, scope))
+		}
+		if len(includes) > 0 {
+			viewParts = append(viewParts, fmt.Sprintf(`"include": %s`, jsonStringArray(includes)))
+		}
+		if description != "" {
+			viewParts = append(viewParts, fmt.Sprintf(`"description": %q`, description))
+		}
+		valueJSON := specEntryObject(viewParts, 2)
+		if perr := model.PatchInsert(modelPath, func(data []byte) ([]byte, error) {
+			return model.InsertObjectEntry(data, []string{"views"}, viewKey, valueJSON)
+		}); perr != nil {
+			if err := model.Save(modelPath, m); err != nil {
+				return exitWithCode(fmt.Errorf("saving model: %w", err), 2)
+			}
+		}
 	}
 
 	// Output result

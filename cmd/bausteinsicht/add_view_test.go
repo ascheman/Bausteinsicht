@@ -3,10 +3,51 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
 )
+
+// TestAddView_NewViewPreservesComments guards the comment-preserving save
+// (#122): adding a NEW view must not re-serialise the model and drop comments.
+func TestAddView_NewViewPreservesComments(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "architecture.jsonc")
+	content := `{
+  // PREAMBLE-MARKER: keep me
+  "specification": { "elements": { "system": {"notation": "box"} }, "relationships": {} },
+  "model": { "a": { "kind": "system", "title": "A" } },
+  "relationships": [],
+  "views": {
+    // VIEW-MARKER: keep me
+    "ctx": { "title": "Context", "include": ["a"] }
+  }
+}`
+	if err := os.WriteFile(p, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewRootCmd()
+	cmd.SetArgs([]string{"add", "view", "overview", "--model", p, "--title", "Overview", "--include", "a"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("add view: %v", err)
+	}
+
+	out, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	for _, marker := range []string{"PREAMBLE-MARKER: keep me", "VIEW-MARKER: keep me"} {
+		if !strings.Contains(s, marker) {
+			t.Errorf("comment %q was dropped by add view:\n%s", marker, s)
+		}
+	}
+	if !strings.Contains(s, `"overview"`) {
+		t.Errorf("expected new view %q to be inserted, got:\n%s", "overview", s)
+	}
+}
 
 func TestAddViewCmd_MissingTitleForNewView(t *testing.T) {
 	dir := t.TempDir()

@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -209,6 +210,60 @@ func chdir(t *testing.T, dir string) func() {
 	return func() {
 		if err := os.Chdir(orig); err != nil {
 			t.Fatal(err)
+		}
+	}
+}
+
+// TestAddSpecification_PreservesComments guards the comment-preserving save
+// (#122): adding an element/relationship type must NOT re-serialise the whole
+// model and drop JSONC comments.
+func TestAddSpecification_PreservesComments(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "architecture.jsonc")
+	content := `{
+  // PREAMBLE-MARKER: keep me
+  "specification": {
+    "elements": {
+      // ELEMENT-MARKER: keep me
+      "system": {"notation": "box"}
+    },
+    "relationships": {
+      "uses": {"notation": "->"}
+    }
+  },
+  "model": {},
+  "relationships": [],
+  "views": {}
+}`
+	if err := os.WriteFile(p, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewRootCmd()
+	cmd.SetArgs([]string{"add", "specification", "element", "custom_type", "--model", p, "--notation", "Custom"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("add element: %v", err)
+	}
+	cmd = NewRootCmd()
+	cmd.SetArgs([]string{"add", "specification", "relationship", "custom_rel", "--model", p, "--notation", "calls", "--dashed"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("add relationship: %v", err)
+	}
+
+	out, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	for _, marker := range []string{"PREAMBLE-MARKER: keep me", "ELEMENT-MARKER: keep me"} {
+		if !strings.Contains(s, marker) {
+			t.Errorf("comment %q was dropped by add specification:\n%s", marker, s)
+		}
+	}
+	// The new entries must have been inserted, too.
+	for _, key := range []string{`"custom_type"`, `"custom_rel"`} {
+		if !strings.Contains(s, key) {
+			t.Errorf("expected %s to be inserted, got:\n%s", key, s)
 		}
 	}
 }
