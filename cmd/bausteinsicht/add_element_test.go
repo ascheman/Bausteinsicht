@@ -511,6 +511,65 @@ func TestAddElementFormattingNested(t *testing.T) {
 	}
 }
 
+// TestAddElementNestedParentPreservesComments guards comment-preserving
+// insertion for a MULTI-LEVEL --parent. Previously the object path skipped the
+// "children" objects between parent segments, so PatchInsert failed and the
+// fallback full save re-serialised the model and dropped all JSONC comments. (#122)
+func TestAddElementNestedParentPreservesComments(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "architecture.jsonc")
+	// A two-level-deep parent (webshop.api) that already has a "children" object.
+	content := `{
+  "specification": { "elements": { "system": {"notation": "box", "container": true}, "container": {"notation": "box", "container": true} } },
+  // KEEP-PREAMBLE
+  "model": {
+    // KEEP-INLINE
+    "webshop": {
+      "kind": "system", "title": "Webshop",
+      "children": {
+        "api": {
+          "kind": "container", "title": "API",
+          "children": {
+            "existing": { "kind": "container", "title": "Existing" }
+          }
+        }
+      }
+    }
+  },
+  "relationships": [],
+  "views": {}
+}`
+	if err := os.WriteFile(p, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewRootCmd()
+	cmd.SetArgs([]string{"add", "element",
+		"--model", p,
+		"--id", "handler",
+		"--kind", "container",
+		"--title", "Handler",
+		"--parent", "webshop.api", // two levels deep; api already has children
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	for _, marker := range []string{"// KEEP-PREAMBLE", "// KEEP-INLINE"} {
+		if !strings.Contains(got, marker) {
+			t.Errorf("comment %q was dropped by nested add element:\n%s", marker, got)
+		}
+	}
+	if !strings.Contains(got, `"handler"`) {
+		t.Errorf("nested element 'handler' not inserted:\n%s", got)
+	}
+}
+
 // TestAddElementInvalidIDs verifies that IDs with dots, spaces, or special
 // characters are rejected. Regression test for #123.
 func TestAddElementInvalidIDs(t *testing.T) {

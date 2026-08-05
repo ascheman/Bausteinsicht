@@ -238,15 +238,17 @@ func saveAddedElement(modelPath string, m *model.BausteinsichtModel, fullID, par
 	}
 	elemJSON := marshalElementJSON(elem, depth)
 
-	// Build the object path for insertion.
-	var objectPath []string
+	// Build the object path for insertion. Each dot-path segment of the parent
+	// is itself nested under its own "children" object, so interleave "children"
+	// between segments: model.<a>.children.<b>.children.….children. Previously
+	// only a single trailing "children" was appended, so a multi-level parent
+	// produced a wrong path, PatchInsert failed, and the fallback full save
+	// dropped all JSONC comments. (#122)
+	objectPath := []string{"model"}
 	if parent != "" {
-		// Insert into the parent's "children" object.
-		parts := splitDotPath(parent)
-		objectPath = append([]string{"model"}, parts...)
-		objectPath = append(objectPath, "children")
-	} else {
-		objectPath = []string{"model"}
+		for _, p := range splitDotPath(parent) {
+			objectPath = append(objectPath, p, "children")
+		}
 	}
 
 	err := model.PatchInsert(modelPath, func(data []byte) ([]byte, error) {
