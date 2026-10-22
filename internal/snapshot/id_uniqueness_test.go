@@ -4,7 +4,31 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
+
+// TestSnapshotIDUniqueUnderFrozenClock is the clock-independent uniqueness
+// proof requested in review: with the wall clock pinned to a single instant,
+// two consecutive IDs must still differ because the monotonic sequence breaks
+// the tie. Unlike the loop/concurrency tests below — whose red-without-the-fix
+// behavior depends on the host clock's resolution — removing the sequence
+// suffix makes this test fail reliably on every platform.
+func TestSnapshotIDUniqueUnderFrozenClock(t *testing.T) {
+	frozen := time.Date(2026, 1, 2, 15, 4, 5, 123456789, time.UTC)
+
+	id1 := snapshotID(frozen, 1)
+	id2 := snapshotID(frozen, 2)
+
+	if id1 == id2 {
+		t.Fatalf("snapshotID produced identical IDs under a frozen clock (%q): the uniqueness suffix is not breaking ties", id1)
+	}
+
+	// Sanity: both still carry the same timestamp prefix — only the suffix differs.
+	const prefix = "snapshot-2026-01-02T15-04-05"
+	if !strings.HasPrefix(id1, prefix) || !strings.HasPrefix(id2, prefix) {
+		t.Errorf("IDs lost the timestamp prefix: %q / %q", id1, id2)
+	}
+}
 
 // TestGenerateSnapshotIDUniqueConcurrent reproduces the collision bug: when
 // many IDs are generated within the same clock tick (common under concurrency,

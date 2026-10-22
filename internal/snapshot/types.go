@@ -55,8 +55,15 @@ func NewSnapshot(message string, model *model.BausteinsichtModel) *Snapshot {
 // listings and format expectations are preserved; a monotonic process-global
 // counter is appended as a suffix to break ties within the same clock tick.
 func generateSnapshotID() string {
-	now := time.Now().UTC()
-	seq := idCounter.Add(1)
+	return snapshotID(time.Now().UTC(), idCounter.Add(1))
+}
+
+// snapshotID formats a snapshot ID from a timestamp and a monotonic sequence
+// number. The sequence is what guarantees uniqueness within a single clock
+// tick; the timestamp only makes the ID human-readable and time-sortable. It
+// is split out from generateSnapshotID so a test can pin the clock and prove
+// the sequence — not the clock's resolution — breaks ties.
+func snapshotID(now time.Time, seq uint64) string {
 	return now.Format("snapshot-2006-01-02T15-04-05") +
 		fmt.Sprintf(".%09dZ-%06d", now.Nanosecond(), seq)
 }
