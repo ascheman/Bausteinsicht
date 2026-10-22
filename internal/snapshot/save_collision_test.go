@@ -185,6 +185,137 @@ func TestSaveSurfacesIndexLockError(t *testing.T) {
 	}
 }
 
+// TestSaveSurfacesCorruptIndex verifies Save reports a corrupt existing index
+// instead of silently discarding it (which would drop every earlier entry), and
+// still cleans up the snapshot file it created.
+func TestSaveSurfacesCorruptIndex(t *testing.T) {
+	base := t.TempDir()
+	mgr := NewManager(base)
+
+	if err := mgr.Save(&Snapshot{
+		ID: "snapshot-ok", Timestamp: time.Now().UTC(), Model: &model.BausteinsichtModel{},
+	}); err != nil {
+		t.Fatalf("seed save: %v", err)
+	}
+
+	indexPath := filepath.Join(base, snapshotDir, "index.json")
+	if err := os.WriteFile(indexPath, []byte("{ not valid json"), fileMode0644); err != nil {
+		t.Fatalf("corrupting index: %v", err)
+	}
+
+	err := mgr.Save(&Snapshot{
+		ID: "snapshot-next", Timestamp: time.Now().UTC(), Model: &model.BausteinsichtModel{},
+	})
+	if err == nil {
+		t.Fatal("expected Save to fail when the existing index cannot be parsed")
+	}
+	if mgr.Exists("snapshot-next") {
+		t.Errorf("snapshot file was left behind after a failed index parse")
+	}
+}
+
+// TestDeleteSurfacesCorruptIndex verifies Delete reports a corrupt index rather
+// than swallowing the failure after it has already removed the snapshot file.
+func TestDeleteSurfacesCorruptIndex(t *testing.T) {
+	base := t.TempDir()
+	mgr := NewManager(base)
+
+	if err := mgr.Save(&Snapshot{
+		ID: "snapshot-del", Timestamp: time.Now().UTC(), Model: &model.BausteinsichtModel{},
+	}); err != nil {
+		t.Fatalf("seed save: %v", err)
+	}
+
+	indexPath := filepath.Join(base, snapshotDir, "index.json")
+	if err := os.WriteFile(indexPath, []byte("{ not valid json"), fileMode0644); err != nil {
+		t.Fatalf("corrupting index: %v", err)
+	}
+
+	if err := mgr.Delete("snapshot-del"); err == nil {
+		t.Fatal("expected Delete to fail when the index cannot be parsed")
+	}
+}
+
+// TestDeleteWithoutIndexSucceeds verifies Delete treats a missing index as a
+// no-op for the index update rather than an error: the snapshot file is gone and
+// there is nothing to unlist.
+func TestDeleteWithoutIndexSucceeds(t *testing.T) {
+	base := t.TempDir()
+	mgr := NewManager(base)
+
+	if err := mgr.Save(&Snapshot{
+		ID: "snapshot-noidx", Timestamp: time.Now().UTC(), Model: &model.BausteinsichtModel{},
+	}); err != nil {
+		t.Fatalf("seed save: %v", err)
+	}
+
+	// Remove the index entirely; the snapshot file remains.
+	if err := os.Remove(filepath.Join(base, snapshotDir, "index.json")); err != nil {
+		t.Fatalf("removing index: %v", err)
+	}
+
+	if err := mgr.Delete("snapshot-noidx"); err != nil {
+		t.Errorf("Delete should succeed when there is no index to update: %v", err)
+	}
+}
+
+// TestSaveKeepsIndexIntactWhenIndexWriteFails proves the index update is atomic.
+// A first snapshot is saved, then a second Save is forced to fail during the
+// index write. The temp-file+rename write must leave the already-published index
+// untouched (not truncated, not partially overwritten) and the failed Save must
+// clean up its own snapshot file — so List never references a snapshot that the
+// failed write caused to be deleted.
+func TestSaveKeepsIndexIntactWhenIndexWriteFails(t *testing.T) {
+	base := t.TempDir()
+	mgr := NewManager(base)
+
+	first := &Snapshot{
+		ID:        "snapshot-keep",
+		Timestamp: time.Now().UTC(),
+		Message:   "first",
+		Model:     &model.BausteinsichtModel{},
+	}
+	if err := mgr.Save(first); err != nil {
+		t.Fatalf("saving first snapshot: %v", err)
+	}
+
+	// Force writeFileAtomic to fail when it opens the temp file: make the temp
+	// path a directory. index.json itself stays a valid file holding "first".
+	tmpAsDir := filepath.Join(base, snapshotDir, "index.json.tmp")
+	if err := os.MkdirAll(tmpAsDir, 0o755); err != nil {
+		t.Fatalf("seeding temp-as-directory: %v", err)
+	}
+
+	second := &Snapshot{
+		ID:        "snapshot-lost",
+		Timestamp: time.Now().UTC(),
+		Message:   "second",
+		Model:     &model.BausteinsichtModel{},
+	}
+	if err := mgr.Save(second); err == nil {
+		t.Fatal("expected Save to fail when the index temp file cannot be created")
+	}
+
+	// The failed Save must not leave its snapshot file behind...
+	if mgr.Exists(second.ID) {
+		t.Errorf("snapshot file %q was left behind after a failed index write", second.ID)
+	}
+
+	// ...and the previously published index must still list exactly the first
+	// snapshot, intact and loadable.
+	_ = os.Remove(tmpAsDir) // clear the obstruction so the index can be read back
+	list, err := mgr.List()
+	if err != nil {
+		t.Fatalf("listing after failed write: %v", err)
+	}
+	if len(list) != 1 || list[0].ID != first.ID {
+		t.Fatalf("index was corrupted by a failed write: got %+v, want only %q", list, first.ID)
+	}
+	if _, err := mgr.Load(first.ID); err != nil {
+		t.Errorf("first snapshot no longer loadable after failed write: %v", err)
+	}
+}
+
 // TestSaveConcurrentDistinctIDsAllIndexed guards against lost index updates.
 // O_EXCL only protects the per-snapshot file; the index is a read-modify-write.
 // When several saves with distinct IDs run concurrently they all create their

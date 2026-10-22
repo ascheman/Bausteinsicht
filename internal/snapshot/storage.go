@@ -211,7 +211,7 @@ func (m *Manager) updateIndex(snapshot *Snapshot) error {
 		if err != nil {
 			return err
 		}
-		return os.WriteFile(indexPath, data, fileMode0644)
+		return writeFileAtomic(indexPath, data)
 	})
 }
 
@@ -242,8 +242,40 @@ func (m *Manager) removeFromIndex(id string) error {
 			return err
 		}
 
-		return os.WriteFile(indexPath, updatedData, fileMode0644)
+		return writeFileAtomic(indexPath, updatedData)
 	})
+}
+
+// writeFileAtomic writes data to a temporary file in the same directory and
+// renames it into place. The rename is the single commit point: a reader never
+// sees a half-written index, and a failure before the rename leaves the existing
+// file untouched. That matters for the index because Save removes the snapshot
+// file when updateIndex fails — if a failed index write had already published a
+// partial update, Save would delete a snapshot that List still references. The
+// caller holds the index lock, so the fixed ".tmp" name cannot collide.
+func writeFileAtomic(path string, data []byte) (err error) {
+	tmp := path + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, fileMode0644)
+	if err != nil {
+		return fmt.Errorf("creating temp file: %w", err)
+	}
+	// Remove the temp file unless it was successfully renamed away below.
+	defer func() {
+		if err != nil {
+			_ = os.Remove(tmp)
+		}
+	}()
+	if _, wErr := f.Write(data); wErr != nil {
+		_ = f.Close()
+		return fmt.Errorf("writing temp file: %w", wErr)
+	}
+	if cErr := f.Close(); cErr != nil {
+		return fmt.Errorf("closing temp file: %w", cErr)
+	}
+	if rErr := os.Rename(tmp, path); rErr != nil {
+		return fmt.Errorf("replacing file: %w", rErr)
+	}
+	return nil
 }
 
 // removeMetadataByID removes a metadata entry by ID
