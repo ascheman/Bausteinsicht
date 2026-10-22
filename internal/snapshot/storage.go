@@ -2,6 +2,7 @@ package snapshot
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -55,8 +56,24 @@ func (m *Manager) Save(snapshot *Snapshot) error {
 	if err != nil {
 		return fmt.Errorf("marshaling snapshot: %w", err)
 	}
-	if err := os.WriteFile(snapshotFile, data, fileMode0644); err != nil {
+	// Write the snapshot fail-closed: O_EXCL turns a colliding ID into an error
+	// instead of a silent overwrite. The in-process counter keeps IDs unique
+	// within one process, but two invocations in the same clock tick (e.g. two
+	// CLI calls on a coarse-resolution clock) can still produce the same ID
+	// across processes; refusing here protects the earlier snapshot (#648).
+	f, err := os.OpenFile(snapshotFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, fileMode0644)
+	if err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return fmt.Errorf("snapshot %q already exists: refusing to overwrite", snapshot.ID)
+		}
+		return fmt.Errorf("creating snapshot file: %w", err)
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
 		return fmt.Errorf("writing snapshot file: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("closing snapshot file: %w", err)
 	}
 
 	// Update index

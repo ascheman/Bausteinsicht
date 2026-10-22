@@ -8,11 +8,11 @@ import (
 )
 
 // TestSnapshotIDUniqueUnderFrozenClock is the clock-independent uniqueness
-// proof requested in review: with the wall clock pinned to a single instant,
-// two consecutive IDs must still differ because the monotonic sequence breaks
-// the tie. Unlike the loop/concurrency tests below — whose red-without-the-fix
-// behavior depends on the host clock's resolution — removing the sequence
-// suffix makes this test fail reliably on every platform.
+// proof: with the wall clock pinned to a single instant, two consecutive IDs
+// must still differ because the monotonic sequence breaks the tie. Unlike the
+// loop/concurrency tests below — whose red-without-the-fix behavior depends on
+// the host clock's resolution — removing the sequence suffix makes this test
+// fail reliably on every platform.
 func TestSnapshotIDUniqueUnderFrozenClock(t *testing.T) {
 	frozen := time.Date(2026, 1, 2, 15, 4, 5, 123456789, time.UTC)
 
