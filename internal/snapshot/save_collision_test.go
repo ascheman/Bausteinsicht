@@ -1,6 +1,10 @@
 package snapshot
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -45,5 +49,50 @@ func TestSaveRejectsDuplicateID(t *testing.T) {
 	}
 	if got.Message != "first" {
 		t.Errorf("snapshot was overwritten: message = %q, want %q", got.Message, "first")
+	}
+}
+
+// TestSaveSurfacesFilesystemError verifies Save reports a filesystem failure
+// (here: an unwritable snapshot directory) rather than swallowing it. This also
+// exercises the non-collision branch of the O_EXCL open error, so the
+// fail-closed write path is fully covered, not just the duplicate-ID case.
+func TestSaveSurfacesFilesystemError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("directory write permissions are not enforced the same way on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses directory permissions")
+	}
+
+	base := t.TempDir()
+	mgr := NewManager(base)
+
+	// Seed one snapshot so the snapshot directory exists.
+	if err := mgr.Save(&Snapshot{
+		ID:        "snapshot-a",
+		Timestamp: time.Now().UTC(),
+		Model:     &model.BausteinsichtModel{},
+	}); err != nil {
+		t.Fatalf("seed save: %v", err)
+	}
+
+	// Make the snapshot directory read-only so creating a new file fails with a
+	// permission error (not os.ErrExist).
+	snapDir := filepath.Join(base, snapshotDir)
+	if err := os.Chmod(snapDir, 0o500); err != nil {
+		t.Fatalf("chmod snapshot dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(snapDir, 0o700) }) // restore so t.TempDir can clean up
+
+	err := mgr.Save(&Snapshot{
+		ID:        "snapshot-b",
+		Timestamp: time.Now().UTC(),
+		Model:     &model.BausteinsichtModel{},
+	})
+	if err == nil {
+		t.Fatal("expected Save to fail when the snapshot directory is not writable")
+	}
+	if errors.Is(err, os.ErrExist) {
+		t.Fatalf("error should report a filesystem failure, not a collision: %v", err)
 	}
 }

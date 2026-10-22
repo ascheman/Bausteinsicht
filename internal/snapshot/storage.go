@@ -68,12 +68,12 @@ func (m *Manager) Save(snapshot *Snapshot) error {
 		}
 		return fmt.Errorf("creating snapshot file: %w", err)
 	}
-	if _, err := f.Write(data); err != nil {
-		_ = f.Close()
-		return fmt.Errorf("writing snapshot file: %w", err)
+	_, writeErr := f.Write(data)
+	if closeErr := f.Close(); writeErr == nil {
+		writeErr = closeErr
 	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("closing snapshot file: %w", err)
+	if writeErr != nil {
+		return fmt.Errorf("writing snapshot file: %w", writeErr)
 	}
 
 	// Update index
