@@ -13,6 +13,7 @@ import (
 const (
 	snapshotDir     = ".bausteinsicht-snapshots"
 	indexFile       = "index.json"
+	indexLockFile   = "index.json.lock"
 	snapshotDir0755 = 0o755
 	fileMode0644    = 0o644
 )
@@ -35,6 +36,38 @@ func (m *Manager) snapshotPath() string {
 // indexPath returns the path to the snapshot index file
 func (m *Manager) indexPath() string {
 	return filepath.Join(m.snapshotPath(), indexFile)
+}
+
+// indexLockPath returns the path to the index lock file. The lock file is a
+// dedicated sidecar so locking never races with reading, writing or replacing
+// index.json itself.
+func (m *Manager) indexLockPath() string {
+	return filepath.Join(m.snapshotPath(), indexLockFile)
+}
+
+// withIndexLock runs fn while holding an exclusive, cross-process advisory lock
+// on the index. Writing a snapshot file is made safe by O_EXCL, but updating
+// index.json is a read-modify-write: without serialization two processes saving
+// distinct IDs in the same tick can both read the same index and the later write
+// drops the other's entry, so a saved snapshot vanishes from List (#648). The
+// lock is an OS advisory lock on a sidecar file, released automatically when the
+// process exits, so it cannot go stale.
+func (m *Manager) withIndexLock(fn func() error) error {
+	// Callers (Save after writing the snapshot file, Delete after removing it)
+	// have already ensured the snapshot directory exists, so opening the lock
+	// file here cannot be the first thing to create it.
+	lock, err := os.OpenFile(m.indexLockPath(), os.O_RDWR|os.O_CREATE, fileMode0644)
+	if err != nil {
+		return fmt.Errorf("opening index lock: %w", err)
+	}
+	// Closing the file releases the advisory lock on every supported platform,
+	// and the OS also drops it if the process dies, so no explicit unlock is
+	// needed and the lock cannot go stale.
+	defer func() { _ = lock.Close() }()
+	if err := lockFileExclusive(lock); err != nil {
+		return fmt.Errorf("locking index: %w", err)
+	}
+	return fn()
 }
 
 // snapshotFilePath returns the path to a specific snapshot file
@@ -144,70 +177,73 @@ func (m *Manager) Delete(id string) error {
 	return nil
 }
 
-// updateIndex adds or updates a snapshot in the index
+// updateIndex adds or updates a snapshot in the index. The whole
+// read-modify-write runs under the index lock so concurrent saves cannot drop
+// one another's entries.
 func (m *Manager) updateIndex(snapshot *Snapshot) error {
-	snapPath := m.snapshotPath()
-	if err := os.MkdirAll(snapPath, snapshotDir0755); err != nil {
-		return err
-	}
+	return m.withIndexLock(func() error {
+		indexPath := m.indexPath()
+		var index SnapshotIndex
 
-	indexPath := m.indexPath()
-	var index SnapshotIndex
+		// Read existing index if it exists
+		if data, err := os.ReadFile(indexPath); err == nil {
+			if err := json.Unmarshal(data, &index); err != nil {
+				return err
+			}
+		}
 
-	// Read existing index if it exists
-	if data, err := os.ReadFile(indexPath); err == nil {
+		// Remove old entry if it exists
+		index.Snapshots = removeMetadataByID(index.Snapshots, snapshot.ID)
+
+		// Add new entry
+		index.Snapshots = append(index.Snapshots, snapshot.ToMetadata())
+
+		// Sort by timestamp (newest first)
+		sort.Slice(index.Snapshots, func(i, j int) bool {
+			return index.Snapshots[i].Timestamp.After(index.Snapshots[j].Timestamp)
+		})
+
+		index.Version = 1
+		index.UpdatedAt = time.Now().UTC()
+
+		// Write updated index
+		data, err := json.MarshalIndent(index, "", "  ")
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(indexPath, data, fileMode0644)
+	})
+}
+
+// removeFromIndex removes a snapshot from the index. Like updateIndex, the
+// read-modify-write runs under the index lock so a concurrent save or delete
+// cannot clobber the result.
+func (m *Manager) removeFromIndex(id string) error {
+	return m.withIndexLock(func() error {
+		indexPath := m.indexPath()
+		data, err := os.ReadFile(indexPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+
+		var index SnapshotIndex
 		if err := json.Unmarshal(data, &index); err != nil {
 			return err
 		}
-	}
 
-	// Remove old entry if it exists
-	index.Snapshots = removeMetadataByID(index.Snapshots, snapshot.ID)
+		index.Snapshots = removeMetadataByID(index.Snapshots, id)
+		index.UpdatedAt = time.Now().UTC()
 
-	// Add new entry
-	index.Snapshots = append(index.Snapshots, snapshot.ToMetadata())
-
-	// Sort by timestamp (newest first)
-	sort.Slice(index.Snapshots, func(i, j int) bool {
-		return index.Snapshots[i].Timestamp.After(index.Snapshots[j].Timestamp)
-	})
-
-	index.Version = 1
-	index.UpdatedAt = time.Now().UTC()
-
-	// Write updated index
-	data, err := json.MarshalIndent(index, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(indexPath, data, fileMode0644)
-}
-
-// removeFromIndex removes a snapshot from the index
-func (m *Manager) removeFromIndex(id string) error {
-	indexPath := m.indexPath()
-	data, err := os.ReadFile(indexPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
+		updatedData, err := json.MarshalIndent(index, "", "  ")
+		if err != nil {
+			return err
 		}
-		return err
-	}
 
-	var index SnapshotIndex
-	if err := json.Unmarshal(data, &index); err != nil {
-		return err
-	}
-
-	index.Snapshots = removeMetadataByID(index.Snapshots, id)
-	index.UpdatedAt = time.Now().UTC()
-
-	updatedData, err := json.MarshalIndent(index, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(indexPath, updatedData, fileMode0644)
+		return os.WriteFile(indexPath, updatedData, fileMode0644)
+	})
 }
 
 // removeMetadataByID removes a metadata entry by ID

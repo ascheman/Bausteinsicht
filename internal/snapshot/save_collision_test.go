@@ -2,9 +2,11 @@ package snapshot
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -92,8 +94,11 @@ func TestSaveSurfacesFilesystemError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected Save to fail when the snapshot directory is not writable")
 	}
-	if errors.Is(err, os.ErrExist) {
-		t.Fatalf("error should report a filesystem failure, not a collision: %v", err)
+	// Assert positively that the permission failure is surfaced: it must not be
+	// mistaken for (or masked as) a collision, and the real cause must survive the
+	// %w wrapping so callers can inspect it.
+	if !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("expected a permission error to be reported, got: %v", err)
 	}
 }
 
@@ -126,5 +131,105 @@ func TestSaveCleansUpAfterPostCreateFailure(t *testing.T) {
 	// a retry on the same ID.
 	if mgr.Exists(snap.ID) {
 		t.Errorf("snapshot file %q was left behind after a failed Save", snap.ID)
+	}
+}
+
+// TestSaveSurfacesSnapshotDirError verifies Save reports a failure to create the
+// snapshot directory instead of proceeding. Pointing the manager at a path whose
+// parent is a regular file makes MkdirAll fail cross-platform.
+func TestSaveSurfacesSnapshotDirError(t *testing.T) {
+	base := t.TempDir()
+	notADir := filepath.Join(base, "not-a-dir")
+	if err := os.WriteFile(notADir, []byte("x"), fileMode0644); err != nil {
+		t.Fatalf("seeding file in place of base dir: %v", err)
+	}
+
+	mgr := NewManager(notADir) // snapshot dir would be a child of a regular file
+	err := mgr.Save(&Snapshot{
+		ID:        "snapshot-nodir",
+		Timestamp: time.Now().UTC(),
+		Model:     &model.BausteinsichtModel{},
+	})
+	if err == nil {
+		t.Fatal("expected Save to fail when the snapshot directory cannot be created")
+	}
+}
+
+// TestSaveSurfacesIndexLockError verifies the index-lock acquisition is itself
+// fail-closed: if the lock file cannot be opened, Save reports the error instead
+// of updating the index unsynchronized, and still cleans up the snapshot file it
+// created. Making the lock path a directory forces the open to fail
+// cross-platform without permission tricks.
+func TestSaveSurfacesIndexLockError(t *testing.T) {
+	base := t.TempDir()
+	mgr := NewManager(base)
+
+	// Pre-create the lock path as a directory so opening it as a file fails.
+	lockAsDir := filepath.Join(base, snapshotDir, "index.json.lock")
+	if err := os.MkdirAll(lockAsDir, 0o755); err != nil {
+		t.Fatalf("seeding lock-as-directory: %v", err)
+	}
+
+	snap := &Snapshot{
+		ID:        "snapshot-lockfail",
+		Timestamp: time.Now().UTC(),
+		Model:     &model.BausteinsichtModel{},
+	}
+	if err := mgr.Save(snap); err == nil {
+		t.Fatal("expected Save to fail when the index lock cannot be opened")
+	}
+
+	// The snapshot file must not linger after the failed Save.
+	if mgr.Exists(snap.ID) {
+		t.Errorf("snapshot file %q was left behind after a failed index lock", snap.ID)
+	}
+}
+
+// TestSaveConcurrentDistinctIDsAllIndexed guards against lost index updates.
+// O_EXCL only protects the per-snapshot file; the index is a read-modify-write.
+// When several saves with distinct IDs run concurrently they all create their
+// files, but without serialization their index updates interleave and the last
+// writer drops the others' entries, so List silently loses snapshots. Each
+// snapshot file exists on disk, yet it is missing from the index. Run with -race
+// to also catch the data race on index.json. The index lock makes every entry
+// survive.
+func TestSaveConcurrentDistinctIDsAllIndexed(t *testing.T) {
+	mgr := NewManager(t.TempDir())
+
+	const n = 24
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	start := make(chan struct{})
+
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start // release all goroutines together to maximise contention
+			snap := &Snapshot{
+				ID:        fmt.Sprintf("snapshot-concurrent-%03d", i),
+				Timestamp: time.Now().UTC(),
+				Message:   fmt.Sprintf("snapshot %d", i),
+				Model:     &model.BausteinsichtModel{},
+			}
+			if err := mgr.Save(snap); err != nil {
+				errs <- err
+			}
+		}(i)
+	}
+
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("concurrent Save failed: %v", err)
+	}
+
+	list, err := mgr.List()
+	if err != nil {
+		t.Fatalf("listing snapshots: %v", err)
+	}
+	if len(list) != n {
+		t.Errorf("List returned %d snapshots, want %d; concurrent index updates lost entries", len(list), n)
 	}
 }
