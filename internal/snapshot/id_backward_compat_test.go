@@ -30,10 +30,12 @@ func TestOldFormatIDsRemainUsable(t *testing.T) {
 		t.Fatalf("saving old-format snapshot: %v", err)
 	}
 
-	// A new-format snapshot created through the production path, with a later
-	// timestamp, so we can also assert ordering is by Timestamp, not by ID shape.
+	// A new-format snapshot created through the production path. Its ID string
+	// encodes today's date, but we give it an *earlier* Timestamp than the legacy
+	// one so List ordering can only come out right if it sorts on Timestamp, not
+	// on the ID.
 	newSnap := NewSnapshot("current snapshot", &model.BausteinsichtModel{})
-	newSnap.Timestamp = time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
+	newSnap.Timestamp = time.Date(2025, 6, 1, 10, 0, 0, 0, time.UTC)
 	if err := mgr.Save(newSnap); err != nil {
 		t.Fatalf("saving new-format snapshot: %v", err)
 	}
@@ -55,8 +57,9 @@ func TestOldFormatIDsRemainUsable(t *testing.T) {
 		t.Errorf("loaded Message = %q, want %q", loaded.Message, "legacy snapshot")
 	}
 
-	// List must contain both, newest-first by Timestamp (the new one is later),
-	// proving ordering does not depend on the ID format.
+	// List must contain both, newest-first by Timestamp. The legacy snapshot has
+	// the later Timestamp while the new-format ID sorts first lexically, so the
+	// legacy ID coming first proves ordering is by Timestamp, not by ID.
 	list, err := mgr.List()
 	if err != nil {
 		t.Fatalf("listing snapshots: %v", err)
@@ -64,9 +67,9 @@ func TestOldFormatIDsRemainUsable(t *testing.T) {
 	if len(list) != 2 {
 		t.Fatalf("List returned %d snapshots, want 2", len(list))
 	}
-	if list[0].ID != newSnap.ID || list[1].ID != oldID {
+	if list[0].ID != oldID || list[1].ID != newSnap.ID {
 		t.Errorf("List order = [%q, %q], want [%q, %q] (newest-first by Timestamp)",
-			list[0].ID, list[1].ID, newSnap.ID, oldID)
+			list[0].ID, list[1].ID, oldID, newSnap.ID)
 	}
 
 	// Delete must remove the old-format snapshot and drop it from the index.

@@ -96,3 +96,35 @@ func TestSaveSurfacesFilesystemError(t *testing.T) {
 		t.Fatalf("error should report a filesystem failure, not a collision: %v", err)
 	}
 }
+
+// TestSaveCleansUpAfterPostCreateFailure verifies that when Save fails after it
+// has already created the snapshot file (here: the index write fails), it
+// removes that file again. Otherwise the orphaned file would make O_EXCL reject
+// every later retry of the same ID, so the snapshot could never be saved.
+func TestSaveCleansUpAfterPostCreateFailure(t *testing.T) {
+	base := t.TempDir()
+	mgr := NewManager(base)
+
+	// Make the index path a directory so updateIndex's file write fails *after*
+	// the snapshot file has been created. This is cross-platform (writing a file
+	// over a directory fails everywhere) and needs no permission tricks.
+	indexAsDir := filepath.Join(base, snapshotDir, "index.json")
+	if err := os.MkdirAll(indexAsDir, 0o755); err != nil {
+		t.Fatalf("seeding index-as-directory: %v", err)
+	}
+
+	snap := &Snapshot{
+		ID:        "snapshot-cleanup",
+		Timestamp: time.Now().UTC(),
+		Model:     &model.BausteinsichtModel{},
+	}
+	if err := mgr.Save(snap); err == nil {
+		t.Fatal("expected Save to fail when the index cannot be written")
+	}
+
+	// The snapshot file this call created must be gone, so O_EXCL does not block
+	// a retry on the same ID.
+	if mgr.Exists(snap.ID) {
+		t.Errorf("snapshot file %q was left behind after a failed Save", snap.ID)
+	}
+}

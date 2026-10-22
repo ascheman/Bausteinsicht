@@ -43,31 +43,41 @@ func (m *Manager) snapshotFilePath(id string) string {
 }
 
 // Save stores a snapshot to disk
-func (m *Manager) Save(snapshot *Snapshot) error {
+func (m *Manager) Save(snapshot *Snapshot) (err error) {
 	// Create snapshot directory if it doesn't exist
 	snapPath := m.snapshotPath()
-	if err := os.MkdirAll(snapPath, snapshotDir0755); err != nil {
-		return fmt.Errorf("creating snapshot directory: %w", err)
+	if mkErr := os.MkdirAll(snapPath, snapshotDir0755); mkErr != nil {
+		return fmt.Errorf("creating snapshot directory: %w", mkErr)
 	}
 
 	// Write snapshot file
 	snapshotFile := m.snapshotFilePath(snapshot.ID)
-	data, err := json.MarshalIndent(snapshot, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshaling snapshot: %w", err)
+	data, mErr := json.MarshalIndent(snapshot, "", "  ")
+	if mErr != nil {
+		return fmt.Errorf("marshaling snapshot: %w", mErr)
 	}
 	// Write the snapshot fail-closed: O_EXCL turns a colliding ID into an error
 	// instead of a silent overwrite. The in-process counter keeps IDs unique
 	// within one process, but two invocations in the same clock tick (e.g. two
 	// CLI calls on a coarse-resolution clock) can still produce the same ID
 	// across processes; refusing here protects the earlier snapshot (#648).
-	f, err := os.OpenFile(snapshotFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, fileMode0644)
-	if err != nil {
-		if errors.Is(err, os.ErrExist) {
+	f, oErr := os.OpenFile(snapshotFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, fileMode0644)
+	if oErr != nil {
+		if errors.Is(oErr, os.ErrExist) {
 			return fmt.Errorf("snapshot %q already exists: refusing to overwrite", snapshot.ID)
 		}
-		return fmt.Errorf("creating snapshot file: %w", err)
+		return fmt.Errorf("creating snapshot file: %w", oErr)
 	}
+	// The file now exists and belongs to this call. If anything below fails,
+	// remove it so O_EXCL does not permanently block a retry on the same ID. A
+	// duplicate rejected above returns before this point, so another writer's
+	// file is never removed.
+	defer func() {
+		if err != nil {
+			_ = os.Remove(snapshotFile)
+		}
+	}()
+
 	_, writeErr := f.Write(data)
 	if closeErr := f.Close(); writeErr == nil {
 		writeErr = closeErr
@@ -77,8 +87,8 @@ func (m *Manager) Save(snapshot *Snapshot) error {
 	}
 
 	// Update index
-	if err := m.updateIndex(snapshot); err != nil {
-		return fmt.Errorf("updating index: %w", err)
+	if idxErr := m.updateIndex(snapshot); idxErr != nil {
+		return fmt.Errorf("updating index: %w", idxErr)
 	}
 
 	return nil
