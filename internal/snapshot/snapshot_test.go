@@ -10,11 +10,6 @@ import (
 	"github.com/docToolchain/Bausteinsicht/internal/snapshot"
 )
 
-// snapshotSubdir mirrors the unexported production const snapshotDir in
-// storage.go; it cannot be imported from the external test package, so keep
-// the two in sync by hand if the directory name ever changes.
-const snapshotSubdir = ".bausteinsicht-snapshots"
-
 // sampleModel returns a small model with a nested element hierarchy and one
 // relationship so element/relationship counting can be exercised.
 func sampleModel() *model.BausteinsichtModel {
@@ -145,7 +140,7 @@ func TestNewManagerAndSaveLoadRoundTrip(t *testing.T) {
 	}
 
 	// The snapshot directory and file should now exist.
-	snapFile := filepath.Join(dir, snapshotSubdir, orig.ID+".json")
+	snapFile := filepath.Join(dir, snapshot.SnapshotDirName, orig.ID+".json")
 	if _, err := os.Stat(snapFile); err != nil {
 		t.Fatalf("expected snapshot file at %s: %v", snapFile, err)
 	}
@@ -302,7 +297,7 @@ func TestDelete_NoIndexStillRemovesFile(t *testing.T) {
 	mgr := snapshot.NewManager(dir)
 
 	// Create a snapshot file directly, without ever writing an index.
-	snapDir := filepath.Join(dir, snapshotSubdir)
+	snapDir := filepath.Join(dir, snapshot.SnapshotDirName)
 	if err := os.MkdirAll(snapDir, 0o755); err != nil {
 		t.Fatalf("mkdir failed: %v", err)
 	}
@@ -330,7 +325,7 @@ func TestLoad_MissingFile(t *testing.T) {
 func TestLoad_CorruptFile(t *testing.T) {
 	dir := t.TempDir()
 	mgr := snapshot.NewManager(dir)
-	snapDir := filepath.Join(dir, snapshotSubdir)
+	snapDir := filepath.Join(dir, snapshot.SnapshotDirName)
 	if err := os.MkdirAll(snapDir, 0o755); err != nil {
 		t.Fatalf("mkdir failed: %v", err)
 	}
@@ -345,7 +340,7 @@ func TestLoad_CorruptFile(t *testing.T) {
 func TestList_CorruptIndex(t *testing.T) {
 	dir := t.TempDir()
 	mgr := snapshot.NewManager(dir)
-	snapDir := filepath.Join(dir, snapshotSubdir)
+	snapDir := filepath.Join(dir, snapshot.SnapshotDirName)
 	if err := os.MkdirAll(snapDir, 0o755); err != nil {
 		t.Fatalf("mkdir failed: %v", err)
 	}
@@ -360,7 +355,7 @@ func TestList_CorruptIndex(t *testing.T) {
 func TestSave_CorruptIndexReturnsError(t *testing.T) {
 	dir := t.TempDir()
 	mgr := snapshot.NewManager(dir)
-	snapDir := filepath.Join(dir, snapshotSubdir)
+	snapDir := filepath.Join(dir, snapshot.SnapshotDirName)
 	if err := os.MkdirAll(snapDir, 0o755); err != nil {
 		t.Fatalf("mkdir failed: %v", err)
 	}
@@ -377,7 +372,7 @@ func TestSave_CorruptIndexReturnsError(t *testing.T) {
 func TestDelete_CorruptIndexReturnsError(t *testing.T) {
 	dir := t.TempDir()
 	mgr := snapshot.NewManager(dir)
-	snapDir := filepath.Join(dir, snapshotSubdir)
+	snapDir := filepath.Join(dir, snapshot.SnapshotDirName)
 	if err := os.MkdirAll(snapDir, 0o755); err != nil {
 		t.Fatalf("mkdir failed: %v", err)
 	}
@@ -421,7 +416,7 @@ func TestListFiles(t *testing.T) {
 	}
 
 	// Drop a non-json file and a subdirectory to prove they are ignored.
-	snapDir := filepath.Join(dir, snapshotSubdir)
+	snapDir := filepath.Join(dir, snapshot.SnapshotDirName)
 	if err := os.WriteFile(filepath.Join(snapDir, "notes.txt"), []byte("ignore me"), 0o644); err != nil {
 		t.Fatalf("write txt failed: %v", err)
 	}
